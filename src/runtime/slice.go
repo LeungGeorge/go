@@ -11,9 +11,9 @@ import (
 )
 
 type slice struct {
-	array unsafe.Pointer
-	len   int
-	cap   int
+	array unsafe.Pointer // 数据
+	len   int            // 长度（元素个数）
+	cap   int            // 容量
 }
 
 // An notInHeapSlice is a slice backed by go:notinheap memory.
@@ -31,6 +31,7 @@ func panicmakeslicecap() {
 	panic(errorString("makeslice: cap out of range"))
 }
 
+// 创建 slice
 func makeslice(et *_type, len, cap int) unsafe.Pointer {
 	mem, overflow := math.MulUintptr(et.size, uintptr(cap))
 	if overflow || mem > maxAlloc || len < 0 || len > cap {
@@ -73,6 +74,10 @@ func makeslice64(et *_type, len64, cap64 int64) unsafe.Pointer {
 // to calculate where to write new values during an append.
 // TODO: When the old backend is gone, reconsider this decision.
 // The SSA backend might prefer the new length or to return only ptr/cap and save stack space.
+//
+// slice 在追加数据时使用 growslice 处理容量增长
+// 入参：slice 元素类型，旧 slice，期望容量
+// 返回：新 slice
 func growslice(et *_type, old slice, cap int) slice {
 	if raceenabled {
 		callerpc := getcallerpc()
@@ -94,19 +99,23 @@ func growslice(et *_type, old slice, cap int) slice {
 
 	newcap := old.cap
 	doublecap := newcap + newcap
+	// 期望容量 cap 超过旧容量 2 倍时，直接使用 cap 作为新 slice 的容量
 	if cap > doublecap {
 		newcap = cap
 	} else {
+		// 就容量小于 1024 时，空间按 2 倍增长
 		if old.len < 1024 {
 			newcap = doublecap
 		} else {
 			// Check 0 < newcap to detect overflow
 			// and prevent an infinite loop.
+			// 新容量以 (1 + 1 / 4) 倍率增加，直到大于期望容量
 			for 0 < newcap && newcap < cap {
 				newcap += newcap / 4
 			}
 			// Set newcap to the requested cap when
 			// the newcap calculation overflowed.
+			// 防止溢出
 			if newcap <= 0 {
 				newcap = cap
 			}
@@ -119,6 +128,7 @@ func growslice(et *_type, old slice, cap int) slice {
 	// For 1 we don't need any division/multiplication.
 	// For sys.PtrSize, compiler will optimize division/multiplication into a shift by a constant.
 	// For powers of 2, use a variable shift.
+	// 计算新容量
 	switch {
 	case et.size == 1:
 		lenmem = uintptr(old.len)
@@ -185,15 +195,18 @@ func growslice(et *_type, old slice, cap int) slice {
 			bulkBarrierPreWriteSrcOnly(uintptr(p), uintptr(old.array), lenmem)
 		}
 	}
+	// 复制旧数据
 	memmove(p, old.array, lenmem)
 
 	return slice{p, old.len, newcap}
 }
 
+// x 是否为 2 的 n 次幂
 func isPowerOfTwo(x uintptr) bool {
 	return x&(x-1) == 0
 }
 
+// slice 复制
 func slicecopy(to, fm slice, width uintptr) int {
 	if fm.len == 0 || to.len == 0 {
 		return 0
